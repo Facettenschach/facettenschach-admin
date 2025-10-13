@@ -57,6 +57,6 @@ jobs:
           script: |
             set -e
             cd /home/fnu_ci/facettenschach
-            docker compose pull admin
-            docker compose up -d admin
+            docker-compose pull admin
+            docker-compose up -d admin
             docker image prune -f
