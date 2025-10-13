@@ -1,49 +1,62 @@
-name: Build and Deploy to VPS
+name: Build and Deploy Admin
 
 on:
   push:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
-  build-and-deploy:
+  build-and-push:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
         with:
-          node-version: '20'
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build
-        # Option A: inject VITE_API_URL from secret into .env.production
-        env:
-          VITE_API_URL: ${{ secrets.FRONTEND_API_URL }}
-        run: |
-          # create .env.production if you prefer Vite to pick it up
-          echo "VITE_API_URL=${VITE_API_URL}" > .env.production
-          npm run build
-
-      - name: Copy dist to VPS (scp)
-        uses: appleboy/scp-action@master
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
         with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: ${{ secrets.SSH_PORT }}
-          source: "dist/*"
-          target: "${{ secrets.DEPLOY_PATH }}"
+          images: ghcr.io/${{ github.repository_owner }}/facettenschach-admin
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-
 
-      - name: Reload nginx on VPS
-        uses: appleboy/ssh-action@master
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
         with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: ${{ secrets.SSH_PORT }}
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/facettenschach-admin:latest
+          cache-to: type=inline
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_PRIVATE_KEY }}
+          port: ${{ secrets.VPS_PORT }}
           script: |
-            sudo systemctl reload nginx || true
+            set -e
+            cd /home/fnu_ci/facettenschach
+            docker compose pull admin
+            docker compose up -d admin
+            docker image prune -f
