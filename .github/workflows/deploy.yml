@@ -56,7 +56,6 @@ jobs:
           key: ${{ secrets.VPS_PRIVATE_KEY }}
           port: ${{ secrets.VPS_PORT }}
           script: |
-            set -e
             cd /home/fnu_ci/facettenschach
             docker compose pull admin
             docker compose up -d admin
